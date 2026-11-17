@@ -1,0 +1,31 @@
+# Node / Frontend
+node_modules/
+dist/
+.vite/
+*.local
+
+# Database Credentials & Secrets (Keeps DB username & password private)
+**/application.properties
+**/application-*.properties
+!**/application.properties.example
+
+# Java & Maven Backend build artifacts
+backend/target/
+target/
+*.class
+
+# Maven wrapper jar cache
+backend/.mvn/wrapper/maven-wrapper.jar
+.mvn/wrapper/maven-wrapper.jar
+
+# Log files
+*.log
+*.log.*
+
+# IDEs & OS
+.idea/
+*.iml
+.vscode/
+.DS_Store
+*.swp
+*~
