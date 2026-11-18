@@ -13,17 +13,27 @@
     fetchUserOrders();
   });
 
+  const allOrdersList = $derived(Array.isArray($orders) ? $orders : []);
+
+  const activeCount = $derived(
+    allOrdersList.filter(
+      (o) => o && (o.status === 'PENDING' || o.status === 'CONFIRMED' || o.status === 'IN TRANSIT')
+    ).length
+  );
+
   const filteredOrders = $derived.by(() => {
     if (filterTab === 'active') {
-      return $orders.filter((o) => o.status === 'PENDING' || o.status === 'CONFIRMED' || o.status === 'In Transit');
+      return allOrdersList.filter(
+        (o) => o && (o.status === 'PENDING' || o.status === 'CONFIRMED' || o.status === 'IN TRANSIT')
+      );
     }
     if (filterTab === 'delivered') {
-      return $orders.filter((o) => o.status === 'DELIVERED');
+      return allOrdersList.filter((o) => o && o.status === 'DELIVERED');
     }
     if (filterTab === 'cancelled') {
-      return $orders.filter((o) => o.status === 'CANCELLED');
+      return allOrdersList.filter((o) => o && o.status === 'CANCELLED');
     }
-    return $orders;
+    return allOrdersList;
   });
 
   function formatDate(iso) {
@@ -36,7 +46,7 @@
         year: 'numeric'
       });
     } catch {
-      return iso;
+      return String(iso);
     }
   }
 
@@ -54,15 +64,15 @@
   }
 
   function handleReorder(order) {
-    if (!order.items || order.items.length === 0) return;
+    if (!order || !Array.isArray(order.items) || order.items.length === 0) return;
     for (const it of order.items) {
       addToBag(
         {
-          id: it.productId,
-          title: it.productName,
+          id: it.productId || it.id || 1,
+          title: it.productName || it.title || 'Product',
           brand: 'Simply Buy',
-          price: it.unitPrice,
-          mrp: it.unitPrice * 1.3,
+          price: it.unitPrice || it.price || 399,
+          mrp: (it.unitPrice || it.price || 399) * 1.3,
           images: it.imageUrl ? [it.imageUrl] : []
         },
         'M'
@@ -92,7 +102,7 @@
         class:active={filterTab === 'all'}
         onclick={() => (filterTab = 'all')}
       >
-        All Orders ({$orders.length})
+        All Orders ({allOrdersList.length})
       </button>
       <button
         type="button"
@@ -100,7 +110,7 @@
         class:active={filterTab === 'active'}
         onclick={() => (filterTab = 'active')}
       >
-        Active ({$orders.filter((o) => o.status === 'PENDING' || o.status === 'CONFIRMED' || o.status === 'In Transit').length})
+        Active ({activeCount})
       </button>
       <button
         type="button"
@@ -121,7 +131,7 @@
     </div>
   </div>
 
-  {#if $ordersLoading}
+  {#if $ordersLoading && allOrdersList.length === 0}
     <div class="loading-state">
       <div class="spinner"></div>
       <p>Loading your orders…</p>
@@ -146,7 +156,7 @@
     </div>
   {:else}
     <div class="orders-stack">
-      {#each filteredOrders as order (order.id)}
+      {#each filteredOrders as order, orderIdx (order.orderNumber || order.id || `order-${orderIdx}`)}
         <article class="order-card">
           <!-- Card Header Strip -->
           <div class="card-header">
@@ -171,7 +181,7 @@
               </div>
               <div class="meta-item ship-to">
                 <span class="meta-label">SHIP TO</span>
-                <span class="meta-value">{order.shippingAddress?.recipientName}</span>
+                <span class="meta-value">{order.shippingAddress?.recipientName || 'Customer'}</span>
               </div>
             </div>
 
@@ -188,7 +198,7 @@
               <div class="status-pill-wrap">
                 <span
                   class="status-pill"
-                  class:status-pending={order.status === 'PENDING' || order.status === 'In Transit'}
+                  class:status-pending={order.status === 'PENDING' || order.status === 'IN TRANSIT'}
                   class:status-confirmed={order.status === 'CONFIRMED'}
                   class:status-delivered={order.status === 'DELIVERED'}
                   class:status-cancelled={order.status === 'CANCELLED'}
@@ -207,9 +217,9 @@
                 <span class="delivery-text">{order.deliveryEstimate || 'Standard delivery in 2-4 days'}</span>
               </div>
 
-              <!-- Top-level Actions -->
+              <!-- Actions -->
               <div class="order-actions">
-                {#if order.status === 'PENDING' || order.status === 'CONFIRMED' || order.status === 'In Transit'}
+                {#if order.status === 'PENDING' || order.status === 'CONFIRMED' || order.status === 'IN TRANSIT'}
                   {#if cancelConfirmId === order.id}
                     <div class="cancel-confirm-box">
                       <span class="confirm-prompt">Cancel this order?</span>
@@ -254,13 +264,13 @@
 
             <!-- Items List -->
             <div class="items-list">
-              {#each order.items as item (item.productId || item.sku || item.productName)}
+              {#each (order.items || []) as item, itemIdx (item.productId || item.sku || `item-${itemIdx}`)}
                 <div class="item-row">
                   <div class="item-visual">
                     {#if item.imageUrl}
                       <img
                         src={item.imageUrl}
-                        alt={item.productName}
+                        alt={item.productName || 'Product'}
                         onerror={(e) => {
                           e.currentTarget.style.display = 'none';
                         }}
@@ -273,18 +283,20 @@
                   </div>
 
                   <div class="item-info">
-                    <h3 class="product-title">{item.productName}</h3>
+                    <h3 class="product-title">{item.productName || 'Curated Product'}</h3>
                     <div class="product-specs">
                       {#if item.sku}
                         <span class="sku-tag">SKU: {item.sku}</span>
                       {/if}
-                      <span class="qty-tag">Quantity: {item.quantity}</span>
-                      <span class="price-tag">{inr(item.unitPrice)} each</span>
+                      <span class="qty-tag">Quantity: {item.quantity || 1}</span>
+                      <span class="price-tag">{inr(item.unitPrice || 0)} each</span>
                     </div>
                   </div>
 
                   <div class="item-subtotal">
-                    <span class="subtotal-amount">{inr(item.totalPrice || item.unitPrice * item.quantity)}</span>
+                    <span class="subtotal-amount">
+                      {inr(item.totalPrice || (item.unitPrice || 0) * (item.quantity || 1))}
+                    </span>
                   </div>
                 </div>
               {/each}
@@ -297,8 +309,11 @@
                 <circle cx="12" cy="10" r="3"></circle>
               </svg>
               <span>
-                Delivery Address: <strong>{order.shippingAddress?.recipientName}</strong> ·
-                {order.shippingAddress?.streetAddress}, {order.shippingAddress?.city} - {order.shippingAddress?.pincode}
+                Delivery Destination: <strong>{order.shippingAddress?.recipientName || 'Customer'}</strong> ·
+                {order.shippingAddress?.streetAddress || ''}, {order.shippingAddress?.city || ''}
+                {#if order.shippingAddress?.pincode}
+                  - {order.shippingAddress.pincode}
+                {/if}
                 {#if order.shippingAddress?.phone}
                   (Phone: +91 {order.shippingAddress.phone})
                 {/if}

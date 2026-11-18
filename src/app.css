@@ -502,28 +502,44 @@ h2 {
 /* ---------- login screen ---------- */
 
 .login-page {
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   min-height: 100vh;
-  padding: 40px 24px;
+  padding: 32px 16px;
   background: radial-gradient(circle at 50% 20%, #fdf8f0 0%, var(--bg) 70%);
+  box-sizing: border-box;
 }
 
 .login-card {
   width: 100%;
-  max-width: 440px;
-  padding: 36px;
+  max-width: 430px;
+  padding: 32px 30px 36px;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-hover);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.05);
+}
+
+.login-card h1 {
+  font-size: 1.45rem;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 0 0 4px;
+  line-height: 1.25;
+}
+
+.login-card .muted.small {
+  margin: 0 0 18px;
+  line-height: 1.4;
+  color: var(--muted);
 }
 
 .login-brand-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
 .luxe-tag {
