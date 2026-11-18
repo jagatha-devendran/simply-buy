@@ -5,9 +5,10 @@
   import { addToBag, openBag } from '../lib/bag.js';
   import { showToast } from '../lib/toast.js';
 
-  let filterTab = $state('all'); // 'all' | 'active' | 'delivered' | 'cancelled'
+  let filterTab = $state('all'); // 'all' | 'confirmed' | 'cancelled' | 'delivered'
   let cancellingId = $state(null);
   let cancelConfirmId = $state(null);
+  let trackingOrderId = $state(null);
 
   onMount(() => {
     fetchUserOrders();
@@ -15,23 +16,31 @@
 
   const allOrdersList = $derived(Array.isArray($orders) ? $orders : []);
 
-  const activeCount = $derived(
+  const confirmedCount = $derived(
     allOrdersList.filter(
-      (o) => o && (o.status === 'PENDING' || o.status === 'CONFIRMED' || o.status === 'IN TRANSIT')
+      (o) => o && (o.status === 'CONFIRMED' || o.status === 'PENDING' || o.status === 'IN TRANSIT')
     ).length
   );
 
+  const cancelledCount = $derived(
+    allOrdersList.filter((o) => o && o.status === 'CANCELLED').length
+  );
+
+  const deliveredCount = $derived(
+    allOrdersList.filter((o) => o && o.status === 'DELIVERED').length
+  );
+
   const filteredOrders = $derived.by(() => {
-    if (filterTab === 'active') {
+    if (filterTab === 'confirmed') {
       return allOrdersList.filter(
-        (o) => o && (o.status === 'PENDING' || o.status === 'CONFIRMED' || o.status === 'IN TRANSIT')
+        (o) => o && (o.status === 'CONFIRMED' || o.status === 'PENDING' || o.status === 'IN TRANSIT')
       );
-    }
-    if (filterTab === 'delivered') {
-      return allOrdersList.filter((o) => o && o.status === 'DELIVERED');
     }
     if (filterTab === 'cancelled') {
       return allOrdersList.filter((o) => o && o.status === 'CANCELLED');
+    }
+    if (filterTab === 'delivered') {
+      return allOrdersList.filter((o) => o && o.status === 'DELIVERED');
     }
     return allOrdersList;
   });
@@ -78,8 +87,13 @@
         'M'
       );
     }
-    showToast('Items re-added to your shopping bag.');
+    showToast('Items added to your shopping bag.');
     openBag();
+  }
+
+  function copyOrderNumber(num) {
+    navigator.clipboard?.writeText(num);
+    showToast(`Order ID #${num} copied to clipboard!`);
   }
 </script>
 
@@ -91,42 +105,61 @@
         <span class="sep">/</span>
         <span class="curr">My Orders</span>
       </nav>
-      <h1>My Orders</h1>
-      <p class="muted">Review order history, track live shipments, or manage cancellations.</p>
+      <div class="title-row">
+        <h1>My Orders</h1>
+        <span class="orders-count-badge">{allOrdersList.length} Total</span>
+      </div>
+      <p class="muted">Review order history, live shipment tracking, invoices, and cancellations.</p>
     </div>
 
-    <div class="order-tabs">
+    <!-- Elegant Tabs Bar with Tab for Confirmed & Cancelled -->
+    <div class="order-tabs" role="tablist">
       <button
         type="button"
+        role="tab"
+        aria-selected={filterTab === 'all'}
         class="tab-btn"
         class:active={filterTab === 'all'}
         onclick={() => (filterTab = 'all')}
       >
-        All Orders ({allOrdersList.length})
+        <span class="tab-label">All Orders</span>
+        <span class="tab-badge">{allOrdersList.length}</span>
       </button>
+
       <button
         type="button"
+        role="tab"
+        aria-selected={filterTab === 'confirmed'}
         class="tab-btn"
-        class:active={filterTab === 'active'}
-        onclick={() => (filterTab = 'active')}
+        class:active={filterTab === 'confirmed'}
+        onclick={() => (filterTab = 'confirmed')}
       >
-        Active ({activeCount})
+        <span class="tab-label">Confirmed</span>
+        <span class="tab-badge badge-confirmed">{confirmedCount}</span>
       </button>
+
       <button
         type="button"
-        class="tab-btn"
-        class:active={filterTab === 'delivered'}
-        onclick={() => (filterTab = 'delivered')}
-      >
-        Delivered
-      </button>
-      <button
-        type="button"
+        role="tab"
+        aria-selected={filterTab === 'cancelled'}
         class="tab-btn"
         class:active={filterTab === 'cancelled'}
         onclick={() => (filterTab = 'cancelled')}
       >
-        Cancelled
+        <span class="tab-label">Cancelled</span>
+        <span class="tab-badge badge-cancelled">{cancelledCount}</span>
+      </button>
+
+      <button
+        type="button"
+        role="tab"
+        aria-selected={filterTab === 'delivered'}
+        class="tab-btn"
+        class:active={filterTab === 'delivered'}
+        onclick={() => (filterTab = 'delivered')}
+      >
+        <span class="tab-label">Delivered</span>
+        <span class="tab-badge">{deliveredCount}</span>
       </button>
     </div>
   </div>
@@ -144,15 +177,25 @@
           <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>
         </svg>
       </div>
-      <h2>No orders found</h2>
+      <h2>No orders found in this tab</h2>
       <p class="muted">
-        {#if filterTab === 'all'}
-          You haven't placed any orders yet. Discover trending styles and top picks now.
+        {#if filterTab === 'confirmed'}
+          You currently have no active or confirmed orders.
+        {:else if filterTab === 'cancelled'}
+          You have not cancelled any orders.
+        {:else if filterTab === 'delivered'}
+          No orders have been marked as delivered yet.
         {:else}
-          No orders match the selected "{filterTab}" filter.
+          You haven't placed any orders yet. Discover trending styles now.
         {/if}
       </p>
-      <a class="btn primary" href="/products">Explore Catalogue</a>
+      {#if filterTab !== 'all'}
+        <button class="btn outline" type="button" onclick={() => (filterTab = 'all')}>
+          View All Orders
+        </button>
+      {:else}
+        <a class="btn primary" href="/products">Explore Catalogue</a>
+      {/if}
     </div>
   {:else}
     <div class="orders-stack">
@@ -171,11 +214,11 @@
               </div>
               <div class="meta-item">
                 <span class="meta-label">PAYMENT METHOD</span>
-                <span class="meta-value payment-badge">
+                <span class="meta-value payment-badge" class:rzp-pay={order.paymentMethod !== 'COD'}>
                   {#if order.paymentMethod === 'COD'}
-                    Cash on Delivery
+                    💵 Cash on Delivery
                   {:else}
-                    Online (Razorpay)
+                    ⚡ Online (Razorpay)
                   {/if}
                 </span>
               </div>
@@ -187,14 +230,29 @@
 
             <div class="order-id-group">
               <span class="meta-label">ORDER ID</span>
-              <span class="order-number">#{order.orderNumber || order.id}</span>
+              <button
+                type="button"
+                class="order-number-btn"
+                title="Click to copy Order ID"
+                onclick={() => copyOrderNumber(order.orderNumber || order.id)}
+              >
+                #{order.orderNumber || order.id}
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+              </button>
             </div>
           </div>
 
           <!-- Card Body -->
           <div class="card-body">
             <!-- Status & Delivery Banner -->
-            <div class="status-banner" class:banner-cancelled={order.status === 'CANCELLED'}>
+            <div
+              class="status-banner"
+              class:banner-cancelled={order.status === 'CANCELLED'}
+              class:banner-confirmed={order.status === 'CONFIRMED' || order.status === 'PENDING' || order.status === 'IN TRANSIT'}
+            >
               <div class="status-pill-wrap">
                 <span
                   class="status-pill"
@@ -203,7 +261,7 @@
                   class:status-delivered={order.status === 'DELIVERED'}
                   class:status-cancelled={order.status === 'CANCELLED'}
                 >
-                  <span class="dot"></span>
+                  <span class="pulse-dot"></span>
                   {order.status === 'PENDING'
                     ? 'Processing'
                     : order.status === 'CONFIRMED'
@@ -217,7 +275,7 @@
                 <span class="delivery-text">{order.deliveryEstimate || 'Standard delivery in 2-4 days'}</span>
               </div>
 
-              <!-- Actions -->
+              <!-- Action Buttons -->
               <div class="order-actions">
                 {#if order.status === 'PENDING' || order.status === 'CONFIRMED' || order.status === 'IN TRANSIT'}
                   {#if cancelConfirmId === order.id}
@@ -254,6 +312,14 @@
 
                 <button
                   type="button"
+                  class="btn outline track-btn"
+                  onclick={() => (trackingOrderId = trackingOrderId === order.id ? null : order.id)}
+                >
+                  {trackingOrderId === order.id ? 'Hide Details' : 'Track Order'}
+                </button>
+
+                <button
+                  type="button"
                   class="btn outline reorder-btn"
                   onclick={() => handleReorder(order)}
                 >
@@ -261,6 +327,35 @@
                 </button>
               </div>
             </div>
+
+            <!-- Expandable Shipment Timeline -->
+            {#if trackingOrderId === order.id}
+              <div class="timeline-tracker">
+                <div class="tracker-step" class:completed={order.status !== 'CANCELLED'}>
+                  <div class="step-icon">✓</div>
+                  <div class="step-label">Order Placed</div>
+                  <div class="step-date">{formatDate(order.date)}</div>
+                </div>
+                <div class="tracker-line" class:completed={order.status === 'CONFIRMED' || order.status === 'DELIVERED'}></div>
+                <div class="tracker-step" class:completed={order.status === 'CONFIRMED' || order.status === 'DELIVERED'}>
+                  <div class="step-icon">✓</div>
+                  <div class="step-label">Confirmed</div>
+                  <div class="step-date">{order.status === 'CANCELLED' ? 'N/A' : 'Processed'}</div>
+                </div>
+                <div class="tracker-line" class:completed={order.status === 'DELIVERED'}></div>
+                <div class="tracker-step" class:completed={order.status === 'DELIVERED'} class:cancelled={order.status === 'CANCELLED'}>
+                  <div class="step-icon">{order.status === 'CANCELLED' ? '✕' : '🚚'}</div>
+                  <div class="step-label">{order.status === 'CANCELLED' ? 'Cancelled' : 'In Transit'}</div>
+                  <div class="step-date">{order.status === 'CANCELLED' ? 'Void' : 'On Schedule'}</div>
+                </div>
+                <div class="tracker-line" class:completed={order.status === 'DELIVERED'}></div>
+                <div class="tracker-step" class:completed={order.status === 'DELIVERED'}>
+                  <div class="step-icon">📦</div>
+                  <div class="step-label">Delivered</div>
+                  <div class="step-date">{order.status === 'DELIVERED' ? 'Complete' : 'Expected'}</div>
+                </div>
+              </div>
+            {/if}
 
             <!-- Items List -->
             <div class="items-list">
@@ -283,12 +378,13 @@
                   </div>
 
                   <div class="item-info">
+                    <span class="item-brand-label">SIMPLY BUY CURATED</span>
                     <h3 class="product-title">{item.productName || 'Curated Product'}</h3>
                     <div class="product-specs">
                       {#if item.sku}
                         <span class="sku-tag">SKU: {item.sku}</span>
                       {/if}
-                      <span class="qty-tag">Quantity: {item.quantity || 1}</span>
+                      <span class="qty-tag">Qty: {item.quantity || 1}</span>
                       <span class="price-tag">{inr(item.unitPrice || 0)} each</span>
                     </div>
                   </div>
@@ -309,13 +405,13 @@
                 <circle cx="12" cy="10" r="3"></circle>
               </svg>
               <span>
-                Delivery Destination: <strong>{order.shippingAddress?.recipientName || 'Customer'}</strong> ·
+                Shipping to: <strong>{order.shippingAddress?.recipientName || 'Customer'}</strong> ·
                 {order.shippingAddress?.streetAddress || ''}, {order.shippingAddress?.city || ''}
                 {#if order.shippingAddress?.pincode}
                   - {order.shippingAddress.pincode}
                 {/if}
                 {#if order.shippingAddress?.phone}
-                  (Phone: +91 {order.shippingAddress.phone})
+                  (Contact: +91 {order.shippingAddress.phone})
                 {/if}
               </span>
             </div>
@@ -363,31 +459,52 @@
     margin-bottom: 28px;
   }
 
+  .title-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
   .header-titles h1 {
-    font-size: 1.85rem;
+    font-size: 2rem;
+    font-family: 'Playfair Display', Georgia, serif;
     color: var(--ink);
-    margin: 0 0 4px;
+    margin: 0;
     letter-spacing: -0.02em;
   }
 
+  .orders-count-badge {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--burgundy);
+    background: #fdf2f2;
+    padding: 3px 10px;
+    border-radius: 999px;
+    border: 1px solid #fecaca;
+  }
+
+  /* Elegant Tabs */
   .order-tabs {
     display: flex;
-    gap: 8px;
-    border-bottom: 1px solid var(--line);
+    gap: 10px;
+    border-bottom: 1.5px solid var(--line);
     padding-bottom: 8px;
     overflow-x: auto;
   }
 
   .tab-btn {
-    padding: 8px 16px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 18px;
     background: transparent;
     border: none;
     border-radius: var(--radius);
-    font-size: 0.9rem;
+    font-size: 0.92rem;
     font-weight: 600;
     color: var(--muted);
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: all 0.18s ease;
   }
 
   .tab-btn:hover {
@@ -397,7 +514,42 @@
 
   .tab-btn.active {
     color: var(--ink);
-    background: #f0e9df;
+    background: #f3ede2;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  }
+
+  .tab-badge {
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: #e8e2d8;
+    color: var(--ink);
+  }
+
+  .tab-btn.active .tab-badge {
+    background: var(--ink);
+    color: #fff;
+  }
+
+  .tab-badge.badge-confirmed {
+    background: #ecfdf5;
+    color: #047857;
+  }
+
+  .tab-btn.active .tab-badge.badge-confirmed {
+    background: #047857;
+    color: #fff;
+  }
+
+  .tab-badge.badge-cancelled {
+    background: #fef2f2;
+    color: #b91c1c;
+  }
+
+  .tab-btn.active .tab-badge.badge-cancelled {
+    background: #b91c1c;
+    color: #fff;
   }
 
   .loading-state {
@@ -442,7 +594,7 @@
 
   .orders-empty-card h2 {
     margin: 0 0 8px;
-    font-size: 1.4rem;
+    font-size: 1.35rem;
   }
 
   .orders-empty-card .muted {
@@ -458,14 +610,19 @@
   .order-card {
     background: #fff;
     border: 1px solid var(--line);
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-lg);
     overflow: hidden;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.03);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .order-card:hover {
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.05);
   }
 
   .card-header {
-    background: #f8f6f2;
-    padding: 14px 20px;
+    background: #f9f7f4;
+    padding: 14px 22px;
     border-bottom: 1px solid var(--line);
     display: flex;
     justify-content: space-between;
@@ -503,6 +660,7 @@
 
   .meta-value.price {
     font-weight: 700;
+    font-size: 0.95rem;
     color: var(--ink);
   }
 
@@ -514,32 +672,64 @@
     font-size: 0.78rem;
   }
 
+  .payment-badge.rzp-pay {
+    color: #0369a1;
+    background: #e0f2fe;
+    font-weight: 700;
+  }
+
   .order-id-group {
     display: flex;
     flex-direction: column;
     align-items: flex-end;
   }
 
-  .order-number {
+  .order-number-btn {
+    border: none;
+    background: transparent;
     font-family: monospace;
-    font-size: 0.92rem;
+    font-size: 0.95rem;
     font-weight: 700;
     color: var(--ink);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    transition: background 0.15s ease;
+  }
+
+  .order-number-btn:hover {
+    background: #ede8df;
+    color: var(--burgundy);
   }
 
   .card-body {
-    padding: 20px;
+    padding: 22px;
   }
 
   .status-banner {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding-bottom: 16px;
-    border-bottom: 1px solid var(--line);
-    margin-bottom: 16px;
+    padding: 12px 16px;
+    background: #fbfbfb;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    margin-bottom: 20px;
     flex-wrap: wrap;
     gap: 12px;
+  }
+
+  .status-banner.banner-confirmed {
+    background: #f6fcf9;
+    border-color: #d1fae5;
+  }
+
+  .status-banner.banner-cancelled {
+    background: #fff8f8;
+    border-color: #fee2e2;
   }
 
   .status-pill-wrap {
@@ -552,18 +742,25 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 4px 10px;
+    padding: 4px 12px;
     border-radius: 999px;
     font-size: 0.8rem;
     font-weight: 700;
     text-transform: capitalize;
   }
 
-  .status-pill .dot {
-    width: 6px;
-    height: 6px;
+  .pulse-dot {
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
     background: currentColor;
+    animation: pulse 1.8s infinite;
+  }
+
+  @keyframes pulse {
+    0% { transform: scale(0.95); opacity: 0.8; }
+    50% { transform: scale(1.2); opacity: 1; }
+    100% { transform: scale(0.95); opacity: 0.8; }
   }
 
   .status-pending {
@@ -587,7 +784,7 @@
   }
 
   .delivery-text {
-    font-size: 0.88rem;
+    font-size: 0.9rem;
     font-weight: 600;
     color: var(--ink);
   }
@@ -599,7 +796,7 @@
   }
 
   .btn.outline {
-    background: transparent;
+    background: #fff;
     border: 1px solid var(--line-strong);
     color: var(--ink);
     padding: 6px 14px;
@@ -661,6 +858,71 @@
     border-radius: var(--radius-sm);
   }
 
+  /* Interactive Shipment Timeline */
+  .timeline-tracker {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    background: #faf8f5;
+    border-radius: var(--radius-md);
+    margin-bottom: 20px;
+    border: 1px dashed var(--line);
+  }
+
+  .tracker-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+
+  .step-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: #e2e8f0;
+    color: #64748b;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+
+  .tracker-step.completed .step-icon {
+    background: #047857;
+    color: #fff;
+  }
+
+  .tracker-step.cancelled .step-icon {
+    background: #dc2626;
+    color: #fff;
+  }
+
+  .step-label {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--ink);
+  }
+
+  .step-date {
+    font-size: 0.7rem;
+    color: var(--muted);
+  }
+
+  .tracker-line {
+    flex: 1;
+    height: 3px;
+    background: #e2e8f0;
+    margin: 0 10px 18px;
+  }
+
+  .tracker-line.completed {
+    background: #047857;
+  }
+
   .items-list {
     display: flex;
     flex-direction: column;
@@ -675,8 +937,8 @@
   }
 
   .item-visual {
-    width: 68px;
-    height: 84px;
+    width: 72px;
+    height: 88px;
     border-radius: var(--radius-sm);
     border: 1px solid var(--line);
     overflow: hidden;
@@ -688,6 +950,11 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
+    transition: transform 0.25s ease;
+  }
+
+  .item-visual:hover img {
+    transform: scale(1.05);
   }
 
   .img-placeholder {
@@ -704,6 +971,15 @@
   .item-info {
     flex: 1;
     min-width: 0;
+  }
+
+  .item-brand-label {
+    display: block;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: var(--burgundy);
+    margin-bottom: 2px;
   }
 
   .product-title {

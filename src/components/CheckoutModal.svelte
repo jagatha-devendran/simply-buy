@@ -754,13 +754,13 @@
     line-height: 1.35;
   }
 
-  .addr-city {
+  .city-line {
     font-size: 0.82rem;
     color: var(--muted);
     margin: 0 0 4px;
   }
 
-  .addr-city strong {
+  .city-line strong {
     color: var(--ink);
   }
 
