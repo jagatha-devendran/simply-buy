@@ -6,15 +6,15 @@
   import Listing from './routes/Listing.svelte';
   import ProductDetail from './routes/ProductDetail.svelte';
   import Wishlist from './routes/Wishlist.svelte';
+  import Orders from './routes/Orders.svelte';
+  import Addresses from './routes/Addresses.svelte';
   import BagDrawer from './components/BagDrawer.svelte';
   import CheckoutModal from './components/CheckoutModal.svelte';
-  import OrdersModal from './components/OrdersModal.svelte';
   import ToastContainer from './components/ToastContainer.svelte';
   import { location } from './lib/router.js';
   import { sessionChecked, restoreSession, user } from './lib/session.js';
 
   let checkoutOpen = $state(false);
-  let ordersOpen = $state(false);
 
   const route = $derived(parseRoute($location));
 
@@ -27,6 +27,8 @@
     if (pathname === '/' || pathname === '') return { name: 'home' };
     if (pathname === '/products') return { name: 'listing' };
     if (pathname === '/wishlist') return { name: 'wishlist' };
+    if (pathname === '/orders') return { name: 'orders' };
+    if (pathname === '/addresses' || pathname === '/address') return { name: 'addresses' };
     const detail = pathname.match(/^\/product\/([^/]+)$/);
     if (detail) return { name: 'product', id: detail[1] };
     return { name: 'missing' };
@@ -43,7 +45,7 @@
 {:else if !$user}
   <Login />
 {:else}
-  <Header onopenorders={() => (ordersOpen = true)} />
+  <Header />
 
   <main>
     {#if route.name === 'home'}
@@ -54,6 +56,10 @@
       <ProductDetail id={route.id} />
     {:else if route.name === 'wishlist'}
       <Wishlist />
+    {:else if route.name === 'orders'}
+      <Orders />
+    {:else if route.name === 'addresses'}
+      <Addresses />
     {:else}
       <div class="shell empty-page">
         <p class="eyebrow">404</p>
@@ -69,9 +75,6 @@
 
   <!-- Checkout Flow Modal -->
   <CheckoutModal open={checkoutOpen} onclose={() => (checkoutOpen = false)} />
-
-  <!-- Orders History Modal -->
-  <OrdersModal open={ordersOpen} onclose={() => (ordersOpen = false)} />
 
   <!-- Interactive Toast Notification Stack -->
   <ToastContainer />

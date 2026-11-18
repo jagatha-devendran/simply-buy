@@ -160,3 +160,67 @@ export async function getAutosuggest(term) {
 export async function getProductDetails(id) {
   return call(`/gateway/v2/product/${encodeURIComponent(id)}/details`);
 }
+
+/* ----------------------------- addresses ---------------------------- */
+
+/** GET /v2/addresses/my/address */
+export async function getAddresses() {
+  const data = await call('/v2/addresses/my/address');
+  return Array.isArray(data?.addresses) ? data.addresses : [];
+}
+
+/** POST /v2/addresses/ */
+export async function createAddress(addressData) {
+  return call('/v2/addresses/', {
+    method: 'POST',
+    body: addressData,
+  });
+}
+
+/** PUT /v2/addresses/unifiedIds/{id} */
+export async function editAddress(id, addressData) {
+  return call(`/v2/addresses/unifiedIds/${id}`, {
+    method: 'PUT',
+    body: addressData,
+  });
+}
+
+/** DELETE /v2/addresses/unifiedIds/{id} */
+export async function removeAddress(id) {
+  return call(`/v2/addresses/unifiedIds/${id}`, {
+    method: 'DELETE',
+  });
+}
+
+/* ------------------------------- orders ------------------------------ */
+
+/** GET /orders */
+export async function getOrders() {
+  const data = await call('/orders');
+  return Array.isArray(data) ? data : [];
+}
+
+/** POST /orders */
+export async function placeOrderApi({ addressId, paymentMethod, couponId = 1 }) {
+  return call('/orders', {
+    method: 'POST',
+    body: { addressId, paymentMethod, couponId },
+  });
+}
+
+/** PUT /orders/{orderId}/cancel */
+export async function cancelOrderApi(orderId) {
+  return call(`/orders/${orderId}/cancel`, {
+    method: 'PUT',
+  });
+}
+
+/* ------------------------------ payments ----------------------------- */
+
+/** POST /payments/verify */
+export async function verifyPaymentApi({ razorpayOrderId, razorpayPaymentId, razorpaySignature }) {
+  return call('/payments/verify', {
+    method: 'POST',
+    body: { razorpayOrderId, razorpayPaymentId, razorpaySignature },
+  });
+}

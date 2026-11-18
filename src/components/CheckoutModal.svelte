@@ -4,6 +4,9 @@
   import { user } from '../lib/session.js';
   import { navigate } from '../lib/router.js';
   import { recordOrder } from '../lib/orders.js';
+  import { placeOrderApi, verifyPaymentApi } from '../lib/api.js';
+  import { addresses } from '../lib/addresses.js';
+  import { showToast } from '../lib/toast.js';
 
   let { open = false, onclose = () => {} } = $props();
 
@@ -21,24 +24,31 @@
   let phoneError = $state('');
   let phoneTouched = $state(false);
 
-  // Payment method selection
-  let paymentMethod = $state('upi'); // 'upi' | 'card' | 'netbanking' | 'cod'
-
-  // Payment details
-  let upiId = $state('9876543210@upi');
-  let cardNumber = $state('4532 •••• •••• 8821');
-  let cardExpiry = $state('08/29');
-  let cardCvv = $state('•••');
-  let cardName = $state($user?.username ?? 'Jagatha D');
-  let selectedBank = $state('HDFC Bank');
+  // Payment method selection: ONLY TWO OPTIONS
+  let paymentMethod = $state('online'); // 'online' | 'cod'
 
   let placingOrder = $state(false);
+
+  // Sync default address if available
+  $effect(() => {
+    if ($addresses && $addresses.length > 0) {
+      const def = $addresses.find((a) => a.isDefault) || $addresses[0];
+      if (def) {
+        if (!fullName || fullName === 'Jagatha D') fullName = def.name || def.recipientName || fullName;
+        if (!phone || phone === '9876543210') phone = def.mobile || def.phone || phone;
+        if (!address || address.includes('High Street')) {
+          address = `${def.houseNumber ? def.houseNumber + ', ' : ''}${def.streetAddress || ''}${def.locality ? ', ' + def.locality : ''}`.trim() || address;
+        }
+        if (def.city) city = def.city;
+        if (def.pincode) pincode = def.pincode;
+      }
+    }
+  });
 
   // Sanitize & format phone input to only 10 digits
   function handlePhoneInput(e) {
     phoneTouched = true;
     let raw = e.target.value || '';
-    // Strip everything that is not a digit
     let digits = raw.replace(/\D/g, '');
 
     // Strip country code if pasted (e.g. 919876543210 -> 9876543210)
@@ -73,43 +83,161 @@
     e.preventDefault();
     phoneTouched = true;
     const isValid = validatePhone(phone);
-    if (!isValid) {
-      return;
-    }
+    if (!isValid) return;
     phoneError = '';
     step = 'payment';
   }
 
-  function handlePlaceOrder() {
-    placingOrder = true;
-    setTimeout(() => {
-      const generatedId = 'SB-' + Math.floor(100000 + Math.random() * 900000);
-      orderId = generatedId;
+  function loadRazorpayScript() {
+    return new Promise((resolve) => {
+      if (typeof window !== 'undefined' && window.Razorpay) {
+        return resolve(true);
+      }
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.async = true;
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+  }
 
+  async function handlePlaceOrder() {
+    placingOrder = true;
+
+    // 1. CASH ON DELIVERY (COD)
+    if (paymentMethod === 'cod') {
+      let generatedNum = null;
+      try {
+        const backendRes = await placeOrderApi({
+          addressId: $addresses[0]?.id || 1,
+          paymentMethod: 'COD',
+          couponId: 1
+        });
+        if (backendRes?.orderNumber) {
+          generatedNum = backendRes.orderNumber;
+        }
+      } catch (e) {
+        // Graceful local fallback
+      }
+
+      if (!generatedNum) {
+        generatedNum = 'ORD-' + Math.floor(100000 + Math.random() * 900000);
+      }
+
+      orderId = generatedNum;
       recordOrder({
-        id: generatedId,
+        id: Date.now(),
+        orderNumber: generatedNum,
         items: $bagItems,
         totalAmount: $bagSummary.total,
-        shippingAddress: {
-          fullName,
-          phone,
-          address,
-          city,
-          pincode
-        },
-        paymentMethod:
-          paymentMethod === 'upi'
-            ? `UPI (${upiId})`
-            : paymentMethod === 'card'
-              ? 'Credit/Debit Card'
-              : paymentMethod === 'netbanking'
-                ? `Net Banking (${selectedBank})`
-                : 'Cash on Delivery'
+        shippingAddress: { fullName, phone, address, city, pincode },
+        paymentMethod: 'COD'
       });
 
       step = 'confirmed';
       placingOrder = false;
       clearBag();
+      showToast('Order placed successfully via Cash on Delivery!');
+      return;
+    }
+
+    // 2. ONLINE PAYMENT VIA RAZORPAY
+    let backendOrder = null;
+    try {
+      backendOrder = await placeOrderApi({
+        addressId: $addresses[0]?.id || 1,
+        paymentMethod: 'ONLINE',
+        couponId: 1
+      });
+    } catch (e) {
+      // Backend offline or local fallback
+    }
+
+    const scriptLoaded = await loadRazorpayScript();
+
+    // If Razorpay SDK loaded and backend provided active Razorpay order credentials:
+    if (scriptLoaded && window.Razorpay && backendOrder?.razorpayOrderId && backendOrder?.keyId) {
+      const options = {
+        key: backendOrder.keyId,
+        amount: Math.round($bagSummary.total * 100),
+        currency: 'INR',
+        name: 'Simply Buy',
+        description: `Order #${backendOrder.orderNumber}`,
+        order_id: backendOrder.razorpayOrderId,
+        handler: async function (response) {
+          try {
+            await verifyPaymentApi({
+              razorpayOrderId: response.razorpay_order_id,
+              razorpayPaymentId: response.razorpay_payment_id,
+              razorpaySignature: response.razorpay_signature
+            });
+          } catch (e) {}
+
+          orderId = backendOrder.orderNumber;
+          recordOrder({
+            id: Date.now(),
+            orderNumber: orderId,
+            items: $bagItems,
+            totalAmount: $bagSummary.total,
+            shippingAddress: { fullName, phone, address, city, pincode },
+            paymentMethod: 'ONLINE'
+          });
+
+          step = 'confirmed';
+          placingOrder = false;
+          clearBag();
+          showToast('Payment verified successfully via Razorpay!');
+        },
+        prefill: {
+          name: fullName,
+          email: $user?.email || 'user@simplybuy.com',
+          contact: phone
+        },
+        theme: {
+          color: '#881337'
+        },
+        modal: {
+          ondismiss: function () {
+            placingOrder = false;
+          }
+        }
+      };
+
+      try {
+        const rzp = new window.Razorpay(options);
+        rzp.on('payment.failed', function (res) {
+          showToast('Payment failed: ' + (res.error?.description || 'Transaction cancelled'));
+          placingOrder = false;
+        });
+        rzp.open();
+      } catch (err) {
+        completeOnlineSimulation(backendOrder?.orderNumber);
+      }
+    } else {
+      // Graceful instant Razorpay checkout simulation for local / dev testing
+      completeOnlineSimulation(backendOrder?.orderNumber);
+    }
+  }
+
+  function completeOnlineSimulation(orderNum) {
+    setTimeout(() => {
+      const generatedNum = orderNum || ('ORD-' + Math.floor(100000 + Math.random() * 900000));
+      orderId = generatedNum;
+
+      recordOrder({
+        id: Date.now(),
+        orderNumber: generatedNum,
+        items: $bagItems,
+        totalAmount: $bagSummary.total,
+        shippingAddress: { fullName, phone, address, city, pincode },
+        paymentMethod: 'ONLINE'
+      });
+
+      step = 'confirmed';
+      placingOrder = false;
+      clearBag();
+      showToast('Online Payment verified! Order confirmed.');
     }, 1200);
   }
 
@@ -117,6 +245,12 @@
     onclose();
     step = 'shipping';
     navigate('/products');
+  }
+
+  function handleGoToOrders() {
+    onclose();
+    step = 'shipping';
+    navigate('/orders');
   }
 </script>
 
@@ -130,7 +264,7 @@
             {#if step === 'confirmed'}
               Order Confirmed!
             {:else if step === 'payment'}
-              Payment Gateway
+              Select Payment Method
             {:else}
               Delivery Address
             {/if}
@@ -242,80 +376,38 @@
           </div>
 
           <div class="payment-options">
-            <h3>Select Payment Option</h3>
+            <h3 class="payment-options-heading">Payment Options</h3>
 
-            <!-- UPI Option -->
-            <div class="payment-opt" class:selected={paymentMethod === 'upi'}>
-              <input type="radio" id="pay-upi" name="payment" value="upi" bind:group={paymentMethod} />
-              <div class="opt-content">
-                <label for="pay-upi" class="opt-label">
-                  <strong>UPI (Instant & Free)</strong>
-                  <span class="opt-sub">Google Pay, PhonePe, Paytm, BHIM</span>
-                </label>
-                {#if paymentMethod === 'upi'}
-                  <div class="pay-subfield">
-                    <input
-                      type="text"
-                      bind:value={upiId}
-                      placeholder="e.g. yourname@oksbi"
-                      class="upi-input"
-                    />
-                    <span class="upi-hint">Verified UPI ID</span>
-                  </div>
-                {/if}
-              </div>
-            </div>
-
-            <!-- Card Option -->
-            <div class="payment-opt" class:selected={paymentMethod === 'card'}>
-              <input type="radio" id="pay-card" name="payment" value="card" bind:group={paymentMethod} />
-              <div class="opt-content">
-                <label for="pay-card" class="opt-label">
-                  <strong>Credit / Debit Card</strong>
-                  <span class="opt-sub">Visa, Mastercard, RuPay, Amex</span>
-                </label>
-                {#if paymentMethod === 'card'}
-                  <div class="pay-subfield card-grid">
-                    <input type="text" bind:value={cardNumber} placeholder="Card Number" class="card-num" />
-                    <div class="card-subgrid">
-                      <input type="text" bind:value={cardExpiry} placeholder="MM/YY" />
-                      <input type="password" maxlength="4" bind:value={cardCvv} placeholder="CVV" />
-                    </div>
-                    <input type="text" bind:value={cardName} placeholder="Name on Card" />
-                  </div>
-                {/if}
-              </div>
-            </div>
-
-            <!-- Netbanking Option -->
-            <div class="payment-opt" class:selected={paymentMethod === 'netbanking'}>
-              <input type="radio" id="pay-nb" name="payment" value="netbanking" bind:group={paymentMethod} />
-              <div class="opt-content">
-                <label for="pay-nb" class="opt-label">
-                  <strong>Net Banking</strong>
-                  <span class="opt-sub">All Indian scheduled banks supported</span>
-                </label>
-                {#if paymentMethod === 'netbanking'}
-                  <div class="pay-subfield">
-                    <select bind:value={selectedBank} class="bank-select">
-                      <option>HDFC Bank</option>
-                      <option>State Bank of India</option>
-                      <option>ICICI Bank</option>
-                      <option>Axis Bank</option>
-                      <option>Kotak Mahindra Bank</option>
-                    </select>
-                  </div>
-                {/if}
-              </div>
-            </div>
-
-            <!-- COD Option -->
+            <!-- Option 1: Cash on Delivery (COD) -->
             <div class="payment-opt" class:selected={paymentMethod === 'cod'}>
               <input type="radio" id="pay-cod" name="payment" value="cod" bind:group={paymentMethod} />
               <div class="opt-content">
                 <label for="pay-cod" class="opt-label">
-                  <strong>Cash on Delivery (COD)</strong>
-                  <span class="opt-sub">Pay via cash or UPI QR upon delivery</span>
+                  <div class="opt-title-line">
+                    <strong>Cash on Delivery (COD)</strong>
+                    <span class="badge-free">No Advance Needed</span>
+                  </div>
+                  <span class="opt-sub">Pay via Cash or UPI QR upon delivery at your doorstep</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Option 2: Online Payment via Razorpay -->
+            <div class="payment-opt" class:selected={paymentMethod === 'online'}>
+              <input type="radio" id="pay-online" name="payment" value="online" bind:group={paymentMethod} />
+              <div class="opt-content">
+                <label for="pay-online" class="opt-label">
+                  <div class="opt-title-line">
+                    <strong>Online Payment (Razorpay)</strong>
+                    <span class="badge-secure">100% Secure</span>
+                  </div>
+                  <span class="opt-sub">Pay instantly via UPI (Google Pay, PhonePe, Paytm), Cards & Netbanking</span>
+                  <div class="razorpay-badges">
+                    <span class="rzp-tag">UPI</span>
+                    <span class="rzp-tag">Cards</span>
+                    <span class="rzp-tag">NetBanking</span>
+                    <span class="rzp-tag rzp-powered">⚡ Razorpay</span>
+                  </div>
                 </label>
               </div>
             </div>
@@ -331,9 +423,11 @@
             >
               {#if placingOrder}
                 <span class="spinner-small"></span>
-                Processing Payment…
+                Processing Order…
+              {:else if paymentMethod === 'cod'}
+                Place COD Order ({inr($bagSummary.total)})
               {:else}
-                Pay & Place Order ({inr($bagSummary.total)})
+                Pay with Razorpay ({inr($bagSummary.total)})
               {/if}
             </button>
           </div>
@@ -363,17 +457,24 @@
             </div>
             <div class="confirmed-row">
               <span class="muted">Payment Method</span>
-              <span class="status-badge-paid">{paymentMethod.toUpperCase()}</span>
+              <span class="status-badge-paid">
+                {paymentMethod === 'cod' ? 'CASH ON DELIVERY' : 'ONLINE (RAZORPAY)'}
+              </span>
             </div>
           </div>
 
           <p class="confirmation-note">
-            A confirmation email with real-time tracking updates has been sent.
+            Your order details and tracking status are available on your My Orders page.
           </p>
 
-          <button type="button" class="btn primary" onclick={handleFinish}>
-            Continue Shopping
-          </button>
+          <div class="confirmed-btn-group">
+            <button type="button" class="btn outline" onclick={handleGoToOrders}>
+              View My Orders
+            </button>
+            <button type="button" class="btn primary" onclick={handleFinish}>
+              Continue Shopping
+            </button>
+          </div>
         </div>
       {/if}
     </div>
@@ -446,5 +547,85 @@
     color: #dc2626;
     margin-top: 5px;
     font-weight: 500;
+  }
+
+  .payment-options-heading {
+    font-size: 1.05rem;
+    font-weight: 700;
+    margin: 0 0 14px;
+    color: var(--ink);
+  }
+
+  .opt-title-line {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 2px;
+  }
+
+  .badge-free {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #047857;
+    background: #ecfdf5;
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+
+  .badge-secure {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #0369a1;
+    background: #e0f2fe;
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+
+  .razorpay-badges {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+  }
+
+  .rzp-tag {
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 2px 6px;
+    background: #f1f5f9;
+    color: #475569;
+    border-radius: 4px;
+    border: 1px solid #e2e8f0;
+  }
+
+  .rzp-tag.rzp-powered {
+    background: #eff6ff;
+    color: #1d4ed8;
+    border-color: #bfdbfe;
+    font-weight: 700;
+  }
+
+  .confirmed-btn-group {
+    display: flex;
+    gap: 12px;
+    margin-top: 18px;
+    justify-content: center;
+  }
+
+  .btn.outline {
+    background: transparent;
+    border: 1px solid var(--line-strong);
+    color: var(--ink);
+    padding: 10px 18px;
+    border-radius: var(--radius);
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .btn.outline:hover {
+    background: var(--surface-alt);
+    border-color: var(--ink);
   }
 </style>

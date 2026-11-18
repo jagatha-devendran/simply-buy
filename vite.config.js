@@ -13,6 +13,11 @@ export default defineConfig({
     proxy: {
       '/auth': { target, changeOrigin: true },
       '/gateway': { target, changeOrigin: true },
+      '/orders': { target, changeOrigin: true },
+      '/payments': { target, changeOrigin: true },
+      '/v2/addresses': { target, changeOrigin: true },
+      '/cart': { target, changeOrigin: true },
+      '/wishlist': { target, changeOrigin: true },
     },
   },
 });

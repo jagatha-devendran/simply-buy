@@ -5,9 +5,6 @@
   import { wishlist } from '../lib/wishlist.js';
   import { bagSummary, openBag } from '../lib/bag.js';
   import { orders } from '../lib/orders.js';
-  import { showToast } from '../lib/toast.js';
-
-  let { onopenorders = () => {} } = $props();
 
   let profileOpen = $state(false);
 
@@ -134,9 +131,6 @@
               <div class="user-meta">
                 <span class="user-display-name">{$user?.username ?? 'Jagatha D'}</span>
                 <span class="user-email">{$user?.email ?? 'jagathadevam965@gmail.com'}</span>
-                <span class="membership-pill">
-                  <span class="star-icon">★</span> Simply Buy Member
-                </span>
               </div>
             </div>
 
@@ -145,20 +139,16 @@
             <!-- Menu List -->
             <div class="popover-nav">
               <!-- Your Orders -->
-              <button
-                type="button"
+              <a
+                href="/orders"
                 class="menu-item"
                 role="menuitem"
-                onclick={() => {
-                  profileOpen = false;
-                  onopenorders();
-                }}
+                onclick={() => (profileOpen = false)}
               >
                 <span class="menu-icon orders-icon">
                   <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path>
-                    <line x1="3" y1="6" x2="21" y2="6"></line>
-                    <path d="M16 10a4 4 0 0 1-8 0"></path>
+                    <rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect>
+                    <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>
                   </svg>
                 </span>
                 <div class="menu-text">
@@ -168,7 +158,7 @@
                 {#if $orders.length > 0}
                   <span class="menu-badge count">{$orders.length}</span>
                 {/if}
-              </button>
+              </a>
 
               <!-- Wishlist -->
               <a
@@ -192,14 +182,11 @@
               </a>
 
               <!-- Saved Addresses -->
-              <button
-                type="button"
+              <a
+                href="/addresses"
                 class="menu-item"
                 role="menuitem"
-                onclick={() => {
-                  profileOpen = false;
-                  showToast('📍 Saved Address: 402, High Street Residencies, Indiranagar, Bengaluru');
-                }}
+                onclick={() => (profileOpen = false)}
               >
                 <span class="menu-icon address-icon">
                   <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
@@ -209,54 +196,9 @@
                 </span>
                 <div class="menu-text">
                   <span class="menu-title">Saved Addresses</span>
-                  <span class="menu-desc">Bengaluru (560038)</span>
+                  <span class="menu-desc">Manage delivery locations</span>
                 </div>
-                <span class="menu-tag">Default</span>
-              </button>
-
-              <!-- Payment Methods -->
-              <button
-                type="button"
-                class="menu-item"
-                role="menuitem"
-                onclick={() => {
-                  profileOpen = false;
-                  showToast('💳 Saved Payment: UPI (9876543210@upi) & Visa Card ending 8821');
-                }}
-              >
-                <span class="menu-icon pay-icon">
-                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
-                    <rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect>
-                    <line x1="1" y1="10" x2="23" y2="10"></line>
-                  </svg>
-                </span>
-                <div class="menu-text">
-                  <span class="menu-title">Payment Methods</span>
-                  <span class="menu-desc">Saved UPI & Cards</span>
-                </div>
-              </button>
-
-              <!-- 24x7 Customer Support -->
-              <button
-                type="button"
-                class="menu-item"
-                role="menuitem"
-                onclick={() => {
-                  profileOpen = false;
-                  showToast('🎧 Simply Buy Support: support@simplybuy.com · 1800-123-BUY');
-                }}
-              >
-                <span class="menu-icon support-icon">
-                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M3 18v-6a9 9 0 0 1 18 0v6"></path>
-                    <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"></path>
-                  </svg>
-                </span>
-                <div class="menu-text">
-                  <span class="menu-title">Help & Support</span>
-                  <span class="menu-desc">24/7 customer assistance</span>
-                </div>
-              </button>
+              </a>
             </div>
 
             <div class="menu-divider"></div>
@@ -420,25 +362,6 @@
     margin: 1px 0 5px;
   }
 
-  .membership-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 10.5px;
-    font-weight: 600;
-    color: #855b23;
-    background: #fdf6ea;
-    border: 1px solid #fae6c6;
-    padding: 2px 7px;
-    border-radius: 999px;
-    width: fit-content;
-  }
-
-  .star-icon {
-    font-size: 11px;
-    color: #d97706;
-  }
-
   .menu-divider {
     height: 1px;
     background: var(--line);
@@ -501,16 +424,6 @@
     background: #f0fdf4;
   }
 
-  .pay-icon {
-    color: #9333ea;
-    background: #faf5ff;
-  }
-
-  .support-icon {
-    color: #ea580c;
-    background: #fff7ed;
-  }
-
   .logout-icon {
     color: #dc2626;
     background: #fef2f2;
@@ -541,16 +454,6 @@
     background: #f2eee6;
     color: var(--ink);
     border-radius: 999px;
-  }
-
-  .menu-tag {
-    font-size: 10px;
-    font-weight: 600;
-    padding: 2px 6px;
-    background: #ecfdf5;
-    color: #059669;
-    border-radius: 4px;
-    text-transform: uppercase;
   }
 
   .logout-btn:hover {
