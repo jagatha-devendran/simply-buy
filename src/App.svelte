@@ -8,11 +8,13 @@
   import Wishlist from './routes/Wishlist.svelte';
   import BagDrawer from './components/BagDrawer.svelte';
   import CheckoutModal from './components/CheckoutModal.svelte';
+  import OrdersModal from './components/OrdersModal.svelte';
   import ToastContainer from './components/ToastContainer.svelte';
   import { location } from './lib/router.js';
   import { sessionChecked, restoreSession, user } from './lib/session.js';
 
   let checkoutOpen = $state(false);
+  let ordersOpen = $state(false);
 
   const route = $derived(parseRoute($location));
 
@@ -41,7 +43,7 @@
 {:else if !$user}
   <Login />
 {:else}
-  <Header />
+  <Header onopenorders={() => (ordersOpen = true)} />
 
   <main>
     {#if route.name === 'home'}
@@ -67,6 +69,9 @@
 
   <!-- Checkout Flow Modal -->
   <CheckoutModal open={checkoutOpen} onclose={() => (checkoutOpen = false)} />
+
+  <!-- Orders History Modal -->
+  <OrdersModal open={ordersOpen} onclose={() => (ordersOpen = false)} />
 
   <!-- Interactive Toast Notification Stack -->
   <ToastContainer />

@@ -104,6 +104,7 @@ export async function signIn({ email, password }) {
     return {
       email: data?.email ?? email,
       username: data?.username ?? email.split('@')[0],
+      phone: data?.phone ?? '',
     };
   } catch (error) {
     // The backend throws a plain RuntimeException for bad credentials, which

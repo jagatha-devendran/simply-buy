@@ -3,6 +3,7 @@
   import { bagItems, bagSummary, clearBag } from '../lib/bag.js';
   import { user } from '../lib/session.js';
   import { navigate } from '../lib/router.js';
+  import { recordOrder } from '../lib/orders.js';
 
   let { open = false, onclose = () => {} } = $props();
 
@@ -10,11 +11,15 @@
   let orderId = $state('');
 
   // Shipping form fields
-  let fullName = $state($user?.username ?? 'Aditi Sharma');
-  let phone = $state('9876543210');
+  let fullName = $state($user?.username ?? 'Jagatha D');
+  let phone = $state($user?.phone || '9876543210');
   let address = $state('402, High Street Residencies, Indiranagar');
   let city = $state('Bengaluru');
   let pincode = $state('560038');
+
+  // Phone validation state
+  let phoneError = $state('');
+  let phoneTouched = $state(false);
 
   // Payment method selection
   let paymentMethod = $state('upi'); // 'upi' | 'card' | 'netbanking' | 'cod'
@@ -24,20 +29,84 @@
   let cardNumber = $state('4532 •••• •••• 8821');
   let cardExpiry = $state('08/29');
   let cardCvv = $state('•••');
-  let cardName = $state($user?.username ?? 'Aditi Sharma');
+  let cardName = $state($user?.username ?? 'Jagatha D');
   let selectedBank = $state('HDFC Bank');
 
   let placingOrder = $state(false);
 
+  // Sanitize & format phone input to only 10 digits
+  function handlePhoneInput(e) {
+    phoneTouched = true;
+    let raw = e.target.value || '';
+    // Strip everything that is not a digit
+    let digits = raw.replace(/\D/g, '');
+
+    // Strip country code if pasted (e.g. 919876543210 -> 9876543210)
+    if (digits.length === 12 && digits.startsWith('91')) {
+      digits = digits.slice(2);
+    } else if (digits.length === 11 && digits.startsWith('0')) {
+      digits = digits.slice(1);
+    }
+
+    phone = digits.slice(0, 10);
+    validatePhone(phone);
+  }
+
+  function validatePhone(val) {
+    if (!val || val.trim().length === 0) {
+      phoneError = 'Phone number is required';
+      return false;
+    }
+    if (val.length < 10) {
+      phoneError = `Please enter all 10 digits (${val.length}/10)`;
+      return false;
+    }
+    if (!/^[6-9]/.test(val)) {
+      phoneError = 'Indian mobile number must start with 6, 7, 8, or 9';
+      return false;
+    }
+    phoneError = '';
+    return true;
+  }
+
   function handleShippingSubmit(e) {
     e.preventDefault();
+    phoneTouched = true;
+    const isValid = validatePhone(phone);
+    if (!isValid) {
+      return;
+    }
+    phoneError = '';
     step = 'payment';
   }
 
   function handlePlaceOrder() {
     placingOrder = true;
     setTimeout(() => {
-      orderId = 'SB-' + Math.floor(100000 + Math.random() * 900000);
+      const generatedId = 'SB-' + Math.floor(100000 + Math.random() * 900000);
+      orderId = generatedId;
+
+      recordOrder({
+        id: generatedId,
+        items: $bagItems,
+        totalAmount: $bagSummary.total,
+        shippingAddress: {
+          fullName,
+          phone,
+          address,
+          city,
+          pincode
+        },
+        paymentMethod:
+          paymentMethod === 'upi'
+            ? `UPI (${upiId})`
+            : paymentMethod === 'card'
+              ? 'Credit/Debit Card'
+              : paymentMethod === 'netbanking'
+                ? `Net Banking (${selectedBank})`
+                : 'Cash on Delivery'
+      });
+
       step = 'confirmed';
       placingOrder = false;
       clearBag();
@@ -78,27 +147,68 @@
       </div>
 
       {#if step === 'shipping'}
-        <form class="checkout-form" onsubmit={handleShippingSubmit}>
+        <form class="checkout-form" onsubmit={handleShippingSubmit} novalidate>
           <div class="form-grid">
             <label class="field">
               <span>Full Name</span>
-              <input type="text" required bind:value={fullName} />
+              <input type="text" required bind:value={fullName} placeholder="Enter your full name" />
             </label>
-            <label class="field">
-              <span>Phone Number</span>
-              <input type="tel" required pattern="[0-9]{10}" bind:value={phone} />
-            </label>
+
+            <div class="field phone-field">
+              <label for="checkout-phone-input">
+                <span>Phone Number</span>
+              </label>
+              <div class="phone-input-wrap" class:has-error={phoneTouched && phoneError}>
+                <span class="country-prefix">+91</span>
+                <input
+                  id="checkout-phone-input"
+                  type="tel"
+                  inputmode="numeric"
+                  maxlength="10"
+                  placeholder="9876543210"
+                  value={phone}
+                  oninput={handlePhoneInput}
+                  onblur={() => {
+                    phoneTouched = true;
+                    validatePhone(phone);
+                  }}
+                />
+              </div>
+              {#if phoneTouched && phoneError}
+                <span class="field-error-msg" role="alert">
+                  <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="8" x2="12" y2="12"></line>
+                    <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                  </svg>
+                  {phoneError}
+                </span>
+              {/if}
+            </div>
+
             <label class="field full">
               <span>Street Address</span>
-              <input type="text" required bind:value={address} />
+              <input type="text" required bind:value={address} placeholder="Flat / House No., Apartment, Street" />
             </label>
+
             <label class="field">
               <span>City</span>
-              <input type="text" required bind:value={city} />
+              <input type="text" required bind:value={city} placeholder="City name" />
             </label>
+
             <label class="field">
               <span>Pincode</span>
-              <input type="text" required pattern="[0-9]{6}" bind:value={pincode} />
+              <input
+                type="text"
+                required
+                maxlength="6"
+                pattern="[0-9]{6}"
+                bind:value={pincode}
+                placeholder="6-digit Pincode"
+                oninput={(e) => {
+                  pincode = e.target.value.replace(/\D/g, '').slice(0, 6);
+                }}
+              />
             </label>
           </div>
 
@@ -124,7 +234,7 @@
         <div class="payment-step">
           <div class="address-preview">
             <span class="preview-badge">Delivering to</span>
-            <p class="preview-name"><strong>{fullName}</strong> · {phone}</p>
+            <p class="preview-name"><strong>{fullName}</strong> · +91 {phone}</p>
             <p class="preview-addr">{address}, {city} - {pincode}</p>
             <button type="button" class="btn link small" onclick={() => (step = 'shipping')}>
               Change address
@@ -138,19 +248,19 @@
             <div class="payment-opt" class:selected={paymentMethod === 'upi'}>
               <input type="radio" id="pay-upi" name="payment" value="upi" bind:group={paymentMethod} />
               <div class="opt-content">
-                <label for="pay-upi" class="opt-title">
-                  <span>UPI / QR Code</span>
-                  <span class="badge-fast">FASTEST</span>
+                <label for="pay-upi" class="opt-label">
+                  <strong>UPI (Instant & Free)</strong>
+                  <span class="opt-sub">Google Pay, PhonePe, Paytm, BHIM</span>
                 </label>
-                <p class="opt-desc">Instant transfer via PhonePe, Paytm, BHIM or any UPI App</p>
-
                 {#if paymentMethod === 'upi'}
-                  <div class="upi-input-box">
-                    <label class="field">
-                      <span>UPI ID / VPA</span>
-                      <input type="text" placeholder="username@upi" bind:value={upiId} />
-                    </label>
-                    <span class="secure-badge">🔒 256-Bit Encrypted & Verified</span>
+                  <div class="pay-subfield">
+                    <input
+                      type="text"
+                      bind:value={upiId}
+                      placeholder="e.g. yourname@oksbi"
+                      class="upi-input"
+                    />
+                    <span class="upi-hint">Verified UPI ID</span>
                   </div>
                 {/if}
               </div>
@@ -160,45 +270,34 @@
             <div class="payment-opt" class:selected={paymentMethod === 'card'}>
               <input type="radio" id="pay-card" name="payment" value="card" bind:group={paymentMethod} />
               <div class="opt-content">
-                <label for="pay-card" class="opt-title">
-                  <span>Credit / Debit Card</span>
-                  <span class="badge-cards">VISA · MC · RUPAY</span>
+                <label for="pay-card" class="opt-label">
+                  <strong>Credit / Debit Card</strong>
+                  <span class="opt-sub">Visa, Mastercard, RuPay, Amex</span>
                 </label>
-                <p class="opt-desc">Secure checkout via your credit or debit card</p>
-
                 {#if paymentMethod === 'card'}
-                  <div class="card-input-box">
-                    <div class="form-grid">
-                      <label class="field full">
-                        <span>Card Number</span>
-                        <input type="text" placeholder="4532 0000 0000 8821" bind:value={cardNumber} />
-                      </label>
-                      <label class="field">
-                        <span>Expiry Date</span>
-                        <input type="text" placeholder="MM/YY" bind:value={cardExpiry} />
-                      </label>
-                      <label class="field">
-                        <span>CVV</span>
-                        <input type="password" maxlength="4" placeholder="123" bind:value={cardCvv} />
-                      </label>
+                  <div class="pay-subfield card-grid">
+                    <input type="text" bind:value={cardNumber} placeholder="Card Number" class="card-num" />
+                    <div class="card-subgrid">
+                      <input type="text" bind:value={cardExpiry} placeholder="MM/YY" />
+                      <input type="password" maxlength="4" bind:value={cardCvv} placeholder="CVV" />
                     </div>
+                    <input type="text" bind:value={cardName} placeholder="Name on Card" />
                   </div>
                 {/if}
               </div>
             </div>
 
-            <!-- Net Banking Option -->
+            <!-- Netbanking Option -->
             <div class="payment-opt" class:selected={paymentMethod === 'netbanking'}>
               <input type="radio" id="pay-nb" name="payment" value="netbanking" bind:group={paymentMethod} />
               <div class="opt-content">
-                <label for="pay-nb" class="opt-title">
-                  <span>Net Banking</span>
+                <label for="pay-nb" class="opt-label">
+                  <strong>Net Banking</strong>
+                  <span class="opt-sub">All Indian scheduled banks supported</span>
                 </label>
-                <p class="opt-desc">All major Indian banks supported</p>
-
                 {#if paymentMethod === 'netbanking'}
-                  <div class="netbanking-box">
-                    <select class="bank-select" bind:value={selectedBank}>
+                  <div class="pay-subfield">
+                    <select bind:value={selectedBank} class="bank-select">
                       <option>HDFC Bank</option>
                       <option>State Bank of India</option>
                       <option>ICICI Bank</option>
@@ -210,22 +309,15 @@
               </div>
             </div>
 
-            <!-- Cash on Delivery -->
+            <!-- COD Option -->
             <div class="payment-opt" class:selected={paymentMethod === 'cod'}>
               <input type="radio" id="pay-cod" name="payment" value="cod" bind:group={paymentMethod} />
               <div class="opt-content">
-                <label for="pay-cod" class="opt-title">
-                  <span>Pay on Delivery</span>
+                <label for="pay-cod" class="opt-label">
+                  <strong>Cash on Delivery (COD)</strong>
+                  <span class="opt-sub">Pay via cash or UPI QR upon delivery</span>
                 </label>
-                <p class="opt-desc">Pay cash or UPI to delivery agent at your doorstep</p>
               </div>
-            </div>
-          </div>
-
-          <div class="checkout-recap">
-            <div class="recap-row">
-              <span>Total Payable</span>
-              <strong class="recap-total">{inr($bagSummary.total)}</strong>
             </div>
           </div>
 
@@ -287,3 +379,72 @@
     </div>
   </div>
 {/if}
+
+<style>
+  .phone-field {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .phone-field label span {
+    display: block;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--ink);
+    margin-bottom: 6px;
+  }
+
+  .phone-input-wrap {
+    display: flex;
+    align-items: center;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: #fff;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    overflow: hidden;
+  }
+
+  .phone-input-wrap:focus-within {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(184, 51, 42, 0.12);
+  }
+
+  .phone-input-wrap.has-error {
+    border-color: #dc2626 !important;
+    background: #fffafa;
+  }
+
+  .country-prefix {
+    padding: 10px 12px;
+    background: #f7f5f0;
+    border-right: 1px solid var(--line);
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--ink);
+    user-select: none;
+    letter-spacing: 0.02em;
+  }
+
+  .phone-input-wrap input {
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    outline: none !important;
+    flex: 1;
+    min-width: 0;
+    padding: 10px 12px;
+    font-size: 0.95rem;
+    font-family: inherit;
+    letter-spacing: 0.05em;
+  }
+
+  .field-error-msg {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.78rem;
+    color: #dc2626;
+    margin-top: 5px;
+    font-weight: 500;
+  }
+</style>

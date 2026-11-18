@@ -48,6 +48,7 @@ public class AuthController {
         Map<String, Object> response = new HashMap<>();
         response.put("username", currentUser.getName());
         response.put("email", currentUser.getEmail());
+        response.put("phone", currentUser.getPhone());
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, cookie.toString())
                 .body(response);
