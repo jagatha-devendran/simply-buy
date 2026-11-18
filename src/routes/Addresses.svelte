@@ -334,13 +334,8 @@
             <input
               type="text"
               required
-              maxlength="6"
-              pattern="[0-9]{6}"
               bind:value={formPincode}
               placeholder="e.g. 560038"
-              oninput={(e) => {
-                formPincode = e.target.value.replace(/\D/g, '').slice(0, 6);
-              }}
             />
           </label>
 

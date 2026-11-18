@@ -5,7 +5,7 @@
   import { navigate } from '../lib/router.js';
   import { recordOrder } from '../lib/orders.js';
   import { placeOrderApi, verifyPaymentApi } from '../lib/api.js';
-  import { addresses } from '../lib/addresses.js';
+  import { addresses, saveNewAddress } from '../lib/addresses.js';
   import { showToast } from '../lib/toast.js';
 
   let { open = false, onclose = () => {} } = $props();
@@ -13,9 +13,13 @@
   let step = $state('shipping'); // 'shipping' | 'payment' | 'confirmed'
   let orderId = $state('');
 
-  // Shipping form fields
+  // Address selection vs New address mode
+  let selectedAddressId = $state(null);
+  let isAddingNewAddress = $state(false);
+
+  // Form fields for new address
   let fullName = $state($user?.username ?? 'Jagatha D');
-  let phone = $state($user?.phone || '9876543210');
+  let phone = $state($user?.phone || '9025477522');
   let address = $state('402, High Street Residencies, Indiranagar');
   let city = $state('Bengaluru');
   let pincode = $state('560038');
@@ -29,29 +33,57 @@
 
   let placingOrder = $state(false);
 
-  // Sync default address if available
+  // Automatically select the default address or first address when available
   $effect(() => {
     if ($addresses && $addresses.length > 0) {
-      const def = $addresses.find((a) => a.isDefault) || $addresses[0];
-      if (def) {
-        if (!fullName || fullName === 'Jagatha D') fullName = def.name || def.recipientName || fullName;
-        if (!phone || phone === '9876543210') phone = def.mobile || def.phone || phone;
-        if (!address || address.includes('High Street')) {
-          address = `${def.houseNumber ? def.houseNumber + ', ' : ''}${def.streetAddress || ''}${def.locality ? ', ' + def.locality : ''}`.trim() || address;
-        }
-        if (def.city) city = def.city;
-        if (def.pincode) pincode = def.pincode;
+      if (selectedAddressId === null) {
+        const def = $addresses.find((a) => a.isDefault) || $addresses[0];
+        if (def) selectedAddressId = def.id;
       }
+    } else {
+      isAddingNewAddress = true;
     }
   });
 
-  // Sanitize & format phone input to only 10 digits
+  // Active delivery address derived from selection or manual input
+  const activeDeliveryAddress = $derived.by(() => {
+    if (isAddingNewAddress || !$addresses || $addresses.length === 0) {
+      return {
+        id: null,
+        recipientName: fullName,
+        phone,
+        streetAddress: address,
+        city,
+        pincode
+      };
+    }
+    const found = $addresses.find((a) => a.id === selectedAddressId) || $addresses[0];
+    if (found) {
+      const fullStreet = `${found.houseNumber ? found.houseNumber + ', ' : ''}${found.streetAddress || ''}${found.locality ? ', ' + found.locality : ''}`.trim();
+      return {
+        id: found.id,
+        recipientName: found.name || found.recipientName || fullName,
+        phone: found.mobile || found.phone || phone,
+        streetAddress: fullStreet || address,
+        city: found.city || city,
+        pincode: found.pincode || pincode
+      };
+    }
+    return {
+      id: null,
+      recipientName: fullName,
+      phone,
+      streetAddress: address,
+      city,
+      pincode
+    };
+  });
+
   function handlePhoneInput(e) {
     phoneTouched = true;
     let raw = e.target.value || '';
     let digits = raw.replace(/\D/g, '');
 
-    // Strip country code if pasted (e.g. 919876543210 -> 9876543210)
     if (digits.length === 12 && digits.startsWith('91')) {
       digits = digits.slice(2);
     } else if (digits.length === 11 && digits.startsWith('0')) {
@@ -79,12 +111,29 @@
     return true;
   }
 
-  function handleShippingSubmit(e) {
-    e.preventDefault();
-    phoneTouched = true;
-    const isValid = validatePhone(phone);
-    if (!isValid) return;
-    phoneError = '';
+  function handleProceedToPayment() {
+    if (isAddingNewAddress) {
+      phoneTouched = true;
+      if (!validatePhone(phone)) return;
+      if (!fullName.trim() || !address.trim() || !city.trim()) {
+        showToast('Please fill in recipient name and street address.');
+        return;
+      }
+      // Also save this newly entered address to user's saved addresses for next time!
+      saveNewAddress({
+        name: fullName.trim(),
+        mobile: phone.trim(),
+        email: $user?.email || 'user@simplybuy.com',
+        houseNumber: '',
+        streetAddress: address.trim(),
+        locality: '',
+        city: city.trim(),
+        state: 'Karnataka',
+        pincode: pincode.trim(),
+        addressType: 'HOME',
+        isDefault: $addresses.length === 0
+      });
+    }
     step = 'payment';
   }
 
@@ -104,13 +153,14 @@
 
   async function handlePlaceOrder() {
     placingOrder = true;
+    const finalAddr = activeDeliveryAddress;
 
     // 1. CASH ON DELIVERY (COD)
     if (paymentMethod === 'cod') {
       let generatedNum = null;
       try {
         const backendRes = await placeOrderApi({
-          addressId: $addresses[0]?.id || 1,
+          addressId: finalAddr.id || $addresses[0]?.id || 1,
           paymentMethod: 'COD',
           couponId: 1
         });
@@ -118,7 +168,7 @@
           generatedNum = backendRes.orderNumber;
         }
       } catch (e) {
-        // Graceful local fallback
+        // Fallback to local
       }
 
       if (!generatedNum) {
@@ -131,14 +181,14 @@
         orderNumber: generatedNum,
         items: $bagItems,
         totalAmount: $bagSummary.total,
-        shippingAddress: { fullName, phone, address, city, pincode },
+        shippingAddress: finalAddr,
         paymentMethod: 'COD'
       });
 
       step = 'confirmed';
       placingOrder = false;
       clearBag();
-      showToast('Order placed successfully via Cash on Delivery!');
+      showToast('Order confirmed via Cash on Delivery!');
       return;
     }
 
@@ -146,7 +196,7 @@
     let backendOrder = null;
     try {
       backendOrder = await placeOrderApi({
-        addressId: $addresses[0]?.id || 1,
+        addressId: finalAddr.id || $addresses[0]?.id || 1,
         paymentMethod: 'ONLINE',
         couponId: 1
       });
@@ -168,12 +218,12 @@
         description: `Order Payment (${inr($bagSummary.total)})`,
         image: 'https://cdn-icons-png.flaticon.com/512/3081/3081559.png',
         prefill: {
-          name: fullName || $user?.username || 'Jagatha D',
+          name: finalAddr.recipientName || 'Jagatha D',
           email: $user?.email || 'jagathadevam965@gmail.com',
-          contact: phone || '9876543210'
+          contact: finalAddr.phone || '9025477522'
         },
         notes: {
-          address: `${address}, ${city} - ${pincode}`
+          address: `${finalAddr.streetAddress}, ${finalAddr.city} - ${finalAddr.pincode}`
         },
         theme: {
           color: '#881337'
@@ -197,7 +247,7 @@
             orderNumber: generatedNum,
             items: $bagItems,
             totalAmount: $bagSummary.total,
-            shippingAddress: { fullName, phone, address, city, pincode },
+            shippingAddress: finalAddr,
             paymentMethod: 'ONLINE'
           });
 
@@ -226,14 +276,14 @@
         });
         rzp.open();
       } catch (err) {
-        completeOnlineSimulation(backendOrder?.orderNumber);
+        completeOnlineSimulation(backendOrder?.orderNumber, finalAddr);
       }
     } else {
-      completeOnlineSimulation(backendOrder?.orderNumber);
+      completeOnlineSimulation(backendOrder?.orderNumber, finalAddr);
     }
   }
 
-  function completeOnlineSimulation(orderNum) {
+  function completeOnlineSimulation(orderNum, finalAddr) {
     setTimeout(() => {
       const generatedNum = orderNum || ('ORD-' + Math.floor(100000 + Math.random() * 900000));
       orderId = generatedNum;
@@ -243,7 +293,7 @@
         orderNumber: generatedNum,
         items: $bagItems,
         totalAmount: $bagSummary.total,
-        shippingAddress: { fullName, phone, address, city, pincode },
+        shippingAddress: finalAddr,
         paymentMethod: 'ONLINE'
       });
 
@@ -283,6 +333,7 @@
             {/if}
           </h2>
         </div>
+        <!-- Always render close button -->
         <button type="button" class="close-btn" onclick={onclose} aria-label="Close modal">
           <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none">
             <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -292,70 +343,133 @@
       </div>
 
       {#if step === 'shipping'}
-        <form class="checkout-form" onsubmit={handleShippingSubmit} novalidate>
-          <div class="form-grid">
-            <label class="field">
-              <span>Full Name</span>
-              <input type="text" required bind:value={fullName} placeholder="Enter your full name" />
-            </label>
-
-            <div class="field phone-field">
-              <label for="checkout-phone-input">
-                <span>Phone Number</span>
-              </label>
-              <div class="phone-input-wrap" class:has-error={phoneTouched && phoneError}>
-                <span class="country-prefix">+91</span>
-                <input
-                  id="checkout-phone-input"
-                  type="tel"
-                  inputmode="numeric"
-                  maxlength="10"
-                  placeholder="9876543210"
-                  value={phone}
-                  oninput={handlePhoneInput}
-                  onblur={() => {
-                    phoneTouched = true;
-                    validatePhone(phone);
-                  }}
-                />
+        <div class="checkout-shipping-view">
+          {#if $addresses.length > 0 && !isAddingNewAddress}
+            <!-- 1. Select from Saved Addresses -->
+            <div class="saved-address-section">
+              <div class="section-top-bar">
+                <span class="section-heading">Select Delivery Address</span>
+                <button
+                  type="button"
+                  class="add-addr-link-btn"
+                  onclick={() => (isAddingNewAddress = true)}
+                >
+                  + Add New Address
+                </button>
               </div>
-              {#if phoneTouched && phoneError}
-                <span class="field-error-msg" role="alert">
-                  <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
-                    <circle cx="12" cy="12" r="10"></circle>
-                    <line x1="12" y1="8" x2="12" y2="12"></line>
-                    <line x1="12" y1="16" x2="12.01" y2="16"></line>
-                  </svg>
-                  {phoneError}
-                </span>
-              {/if}
+
+              <div class="saved-cards-list">
+                {#each $addresses as addr (addr.id)}
+                  <div
+                    class="saved-addr-card"
+                    class:selected={selectedAddressId === addr.id}
+                    onclick={() => (selectedAddressId = addr.id)}
+                    role="button"
+                    tabindex="0"
+                    onkeydown={(e) => {
+                      if (e.key === 'Enter') selectedAddressId = addr.id;
+                    }}
+                  >
+                    <div class="radio-indicator">
+                      <div class="radio-circle"></div>
+                    </div>
+
+                    <div class="addr-card-body">
+                      <div class="addr-header-row">
+                        <span class="recipient-name">{addr.name || addr.recipientName}</span>
+                        <div class="badges-row">
+                          <span class="type-pill">{addr.addressType || 'HOME'}</span>
+                          {#if addr.isDefault}
+                            <span class="default-pill">DEFAULT</span>
+                          {/if}
+                        </div>
+                      </div>
+
+                      <p class="addr-line">
+                        {#if addr.houseNumber}{addr.houseNumber}, {/if}
+                        {addr.streetAddress || ''}{#if addr.locality}, {addr.locality}{/if}
+                      </p>
+                      <p class="city-line">
+                        {addr.city}, {addr.state} - <strong>{addr.pincode}</strong>
+                      </p>
+                      <p class="phone-line">
+                        Mobile: <strong>+91 {addr.mobile || addr.phone}</strong>
+                      </p>
+                    </div>
+                  </div>
+                {/each}
+              </div>
             </div>
+          {:else}
+            <!-- 2. Manual / New Address Form -->
+            <div class="manual-address-section">
+              <div class="section-top-bar">
+                <span class="section-heading">Enter Delivery Address</span>
+                {#if $addresses.length > 0}
+                  <button
+                    type="button"
+                    class="add-addr-link-btn"
+                    onclick={() => (isAddingNewAddress = false)}
+                  >
+                    ← Choose Saved Address
+                  </button>
+                {/if}
+              </div>
 
-            <label class="field full">
-              <span>Street Address</span>
-              <input type="text" required bind:value={address} placeholder="Flat / House No., Apartment, Street" />
-            </label>
+              <div class="form-grid">
+                <label class="field">
+                  <span>Full Name *</span>
+                  <input type="text" required bind:value={fullName} placeholder="Enter your full name" />
+                </label>
 
-            <label class="field">
-              <span>City</span>
-              <input type="text" required bind:value={city} placeholder="City name" />
-            </label>
+                <div class="field phone-field">
+                  <label for="checkout-phone-input">
+                    <span>Mobile Number *</span>
+                  </label>
+                  <div class="phone-input-wrap" class:has-error={phoneTouched && phoneError}>
+                    <span class="country-prefix">+91</span>
+                    <input
+                      id="checkout-phone-input"
+                      type="tel"
+                      inputmode="numeric"
+                      maxlength="10"
+                      placeholder="9876543210"
+                      value={phone}
+                      oninput={handlePhoneInput}
+                      onblur={() => {
+                        phoneTouched = true;
+                        validatePhone(phone);
+                      }}
+                    />
+                  </div>
+                  {#if phoneTouched && phoneError}
+                    <span class="field-error-msg" role="alert">{phoneError}</span>
+                  {/if}
+                </div>
 
-            <label class="field">
-              <span>Pincode</span>
-              <input
-                type="text"
-                required
-                maxlength="6"
-                pattern="[0-9]{6}"
-                bind:value={pincode}
-                placeholder="6-digit Pincode"
-                oninput={(e) => {
-                  pincode = e.target.value.replace(/\D/g, '').slice(0, 6);
-                }}
-              />
-            </label>
-          </div>
+                <label class="field full">
+                  <span>Street Address *</span>
+                  <input type="text" required bind:value={address} placeholder="Flat / House No., Apartment, Street" />
+                </label>
+
+                <label class="field">
+                  <span>City *</span>
+                  <input type="text" required bind:value={city} placeholder="City name" />
+                </label>
+
+                <label class="field">
+                  <span>Pincode *</span>
+                  <!-- Pure text input with no annoying pattern regex popup -->
+                  <input
+                    type="text"
+                    required
+                    bind:value={pincode}
+                    placeholder="e.g. 560038"
+                  />
+                </label>
+              </div>
+            </div>
+          {/if}
 
           <div class="checkout-recap">
             <div class="recap-row">
@@ -366,7 +480,7 @@
 
           <div class="modal-actions">
             <button type="button" class="btn" onclick={onclose}>Cancel</button>
-            <button type="submit" class="btn primary">
+            <button type="button" class="btn primary" onclick={handleProceedToPayment}>
               Proceed to Payment
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
                 <line x1="5" y1="12" x2="19" y2="12"></line>
@@ -374,13 +488,17 @@
               </svg>
             </button>
           </div>
-        </form>
+        </div>
       {:else if step === 'payment'}
         <div class="payment-step">
           <div class="address-preview">
             <span class="preview-badge">Delivering to</span>
-            <p class="preview-name"><strong>{fullName}</strong> · +91 {phone}</p>
-            <p class="preview-addr">{address}, {city} - {pincode}</p>
+            <p class="preview-name">
+              <strong>{activeDeliveryAddress.recipientName}</strong> · +91 {activeDeliveryAddress.phone}
+            </p>
+            <p class="preview-addr">
+              {activeDeliveryAddress.streetAddress}, {activeDeliveryAddress.city} - {activeDeliveryAddress.pincode}
+            </p>
             <button type="button" class="btn link small" onclick={() => (step = 'shipping')}>
               Change address
             </button>
@@ -464,7 +582,7 @@
             </div>
             <div class="confirmed-row">
               <span class="muted">Shipping to</span>
-              <span>{fullName}, {city}</span>
+              <span>{activeDeliveryAddress.recipientName}, {activeDeliveryAddress.city}</span>
             </div>
             <div class="confirmed-row">
               <span class="muted">Payment Method</span>
@@ -493,6 +611,169 @@
 {/if}
 
 <style>
+  .checkout-shipping-view {
+    padding: 24px;
+  }
+
+  .section-top-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+  }
+
+  .section-heading {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--ink);
+  }
+
+  .add-addr-link-btn {
+    border: none;
+    background: transparent;
+    color: var(--burgundy);
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 0;
+  }
+
+  .add-addr-link-btn:hover {
+    text-decoration: underline;
+  }
+
+  .saved-cards-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-height: 280px;
+    overflow-y: auto;
+    padding-right: 4px;
+    margin-bottom: 18px;
+  }
+
+  .saved-addr-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 14px;
+    border: 1.5px solid var(--line);
+    border-radius: var(--radius-md);
+    background: #fff;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .saved-addr-card:hover {
+    border-color: var(--line-strong);
+    background: #fdfcfa;
+  }
+
+  .saved-addr-card.selected {
+    border-color: var(--burgundy);
+    background: #fdf8f8;
+    box-shadow: 0 0 0 1px var(--burgundy);
+  }
+
+  .radio-indicator {
+    padding-top: 2px;
+  }
+
+  .radio-circle {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 2px solid var(--line-strong);
+    background: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s ease;
+  }
+
+  .saved-addr-card.selected .radio-circle {
+    border-color: var(--burgundy);
+    background: var(--burgundy);
+  }
+
+  .saved-addr-card.selected .radio-circle::after {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #fff;
+  }
+
+  .addr-card-body {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .addr-header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+  }
+
+  .recipient-name {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--ink);
+  }
+
+  .badges-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .type-pill {
+    font-size: 0.68rem;
+    font-weight: 700;
+    padding: 1px 6px;
+    background: #f4f2ee;
+    border-radius: 3px;
+    color: var(--ink);
+  }
+
+  .default-pill {
+    font-size: 0.68rem;
+    font-weight: 700;
+    padding: 1px 6px;
+    background: #fdf2f2;
+    color: #991b1b;
+    border-radius: 3px;
+    border: 1px solid #fecaca;
+  }
+
+  .addr-line {
+    font-size: 0.85rem;
+    color: #555;
+    margin: 0 0 2px;
+    line-height: 1.35;
+  }
+
+  .addr-city {
+    font-size: 0.82rem;
+    color: var(--muted);
+    margin: 0 0 4px;
+  }
+
+  .addr-city strong {
+    color: var(--ink);
+  }
+
+  .phone-line {
+    font-size: 0.8rem;
+    color: var(--muted);
+    margin: 0;
+  }
+
+  .phone-line strong {
+    color: var(--ink);
+  }
+
   .phone-field {
     display: flex;
     flex-direction: column;
@@ -551,12 +832,10 @@
   }
 
   .field-error-msg {
-    display: flex;
-    align-items: center;
-    gap: 5px;
+    display: block;
     font-size: 0.78rem;
     color: #dc2626;
-    margin-top: 5px;
+    margin-top: 4px;
     font-weight: 500;
   }
 
